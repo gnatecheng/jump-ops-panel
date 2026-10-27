@@ -14,6 +14,18 @@ pip install -e /path/to/mcp-jumpserver-gui-sucks
 pip install -e /path/to/jump-ops-panel
 ```
 
+## Docker 镜像
+
+镜像**只打包本机 sibling 目录**里的 `mcp-jumpserver-gui-sucks` fork（不会从 PyPI 拉 upstream 包）：
+
+```bash
+cd ~/work/src/github.com/gnatecheng
+./jump-ops-panel/deploy/build-image.sh dev-chengyt-$(date +%Y%m%d%H%M%S)
+docker push "$(cat jump-ops-panel/deploy/.last-image)"
+```
+
+构建信息写入容器内 `/etc/jop-build-info`。
+
 ## 配置
 
 ```bash
