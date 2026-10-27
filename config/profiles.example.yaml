@@ -1,0 +1,43 @@
+defaults:
+  script_remote_dir: /opt/jop/scripts
+  protocol: ssh
+  connect_method: web_cli
+
+profiles:
+  - id: ai-speaker-jms
+    label: "365 AI Speaker 跳板"
+    jumpserver:
+      base_url: http://jump-ai.365selection.com:33031/
+      username: hick
+      password_env: JOP_PASSWORD_HICK
+    target:
+      asset_ref: t3-365_ai-speaker_jumpserver_1
+      account_ref: ops
+      run_as:
+        method: sudo
+        user: root
+    init:
+      scripts:
+        - local: assets/scripts/k-get-nodes.sh
+          remote_name: k-get-nodes.sh
+        - local: assets/scripts/df-h.sh
+          remote_name: df-h.sh
+    operations:
+      - id: id
+        label: "当前用户 id"
+        script: null
+        command: id
+        timeout_seconds: 30
+      - id: k-get-nodes
+        label: "K8s 节点 (k get nodes)"
+        script: k-get-nodes.sh
+        timeout_seconds: 90
+    dashboard:
+      refresh_interval_seconds: 60
+      panels:
+        - id: nodes
+          label: "Nodes"
+          script: k-get-nodes.sh
+        - id: disk
+          label: "磁盘 df -h"
+          script: df-h.sh

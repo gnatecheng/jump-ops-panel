@@ -1,0 +1,11 @@
+{% if last_result %}
+<div class="meta">
+  {{ last_result.label }} ·
+  exit={{ last_result.exit_status if last_result.exit_status is not none else '?' }} ·
+  {{ last_result.finished_at.strftime('%H:%M:%S') }} UTC
+</div>
+{% if last_result.error %}<p class="err">{{ last_result.error }}</p>{% endif %}
+<pre class="output">{{ last_result.stdout or '(无输出)' }}</pre>
+{% else %}
+<p class="meta">尚未执行操作。点击上方按钮运行脚本。</p>
+{% endif %}

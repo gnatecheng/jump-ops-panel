@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+*.egg-info/
+data/
+config/profiles.yaml
+.env

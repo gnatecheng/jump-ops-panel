@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Jump Ops Panel{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <style>
+    :root { font-family: system-ui, sans-serif; color: #1a1a1a; background: #f4f5f7; }
+    body { margin: 0; padding: 1rem 1.25rem 2rem; }
+    header { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    h1 { font-size: 1.25rem; margin: 0; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 960px) { .grid { grid-template-columns: 1fr; } }
+    section { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 1rem; }
+    section h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+    pre.output { background: #111; color: #e6e6e6; padding: 0.75rem; border-radius: 6px;
+      overflow: auto; max-height: 28rem; white-space: pre-wrap; font-size: 0.85rem; margin: 0; }
+    .meta { color: #666; font-size: 0.85rem; margin-bottom: 0.5rem; }
+    button, .btn { cursor: pointer; padding: 0.4rem 0.75rem; border-radius: 6px;
+      border: 1px solid #888; background: #fafafa; font-size: 0.9rem; }
+    button.primary { background: #2563eb; color: #fff; border-color: #1d4ed8; }
+    .ops { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .panel-block { margin-bottom: 1rem; }
+    .panel-block h3 { margin: 0 0 0.35rem; font-size: 0.95rem; }
+    .err { color: #b91c1c; }
+    select { padding: 0.35rem 0.5rem; }
+    label { display: block; margin: 0.5rem 0 0.25rem; font-size: 0.9rem; }
+    input[type=text] { width: 100%; max-width: 24rem; padding: 0.35rem 0.5rem; }
+  </style>
+</head>
+<body>
+  {% block body %}{% endblock %}
+</body>
+</html>

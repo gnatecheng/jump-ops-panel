@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install mcp-jumpserver-gui-sucks (stub dep)
+        run: pip install "httpx>=0.28" "pydantic>=2" "pyyaml>=6"
+      - name: Install panel
+        run: pip install .
+      - name: Import check
+        run: python -c "from jump_ops_panel.models import AppConfig; print('ok')"

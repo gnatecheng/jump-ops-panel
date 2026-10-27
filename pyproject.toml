@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jump-ops-panel"
+version = "0.1.0"
+description = "JumpServer ops panel — htmx UI for configured remote shell scripts"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "apscheduler>=3.10.4",
+    "fastapi>=0.115.0",
+    "jinja2>=3.1.4",
+    "mcp-jumpserver-gui-sucks",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.6.0",
+    "pyyaml>=6.0.2",
+    "uvicorn[standard]>=0.32.0",
+]
+
+[project.scripts]
+jump-ops-panel = "jump_ops_panel.main:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jump_ops_panel"]
+
+[tool.hatch.metadata]
+allow-direct-references = true

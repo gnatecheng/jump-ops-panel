@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Jump Ops Panel{% endblock %}
+{% block body %}
+<header>
+  <h1>Jump Ops Panel</h1>
+  <form method="get" action="/">
+    <label for="profile" style="display:inline">环境</label>
+    <select name="profile" id="profile" onchange="this.form.submit()">
+      {% for p in profiles %}
+      <option value="{{ p.id }}" {% if p.id == active_id %}selected{% endif %}>{{ p.label }}</option>
+      {% endfor %}
+    </select>
+  </form>
+  <span class="meta">目标：{{ profile.target.asset_ref }} / {{ profile.target.account_ref or 'default' }}</span>
+</header>
+
+<div class="grid">
+  <section>
+    <h2>用户输入 / 操作</h2>
+    <p class="meta">JumpServer 使用配置中的 username + password（password_env），本站无 Web 登录。</p>
+    <div class="ops">
+      <button class="primary" hx-post="/profiles/{{ profile.id }}/init" hx-target="#run-result" hx-swap="innerHTML">
+        初始化：上传脚本到远端
+      </button>
+      {% for op in profile.operations %}
+      <button hx-post="/profiles/{{ profile.id }}/ops/{{ op.id }}" hx-target="#run-result" hx-swap="innerHTML">
+        {{ op.label }}
+      </button>
+      {% endfor %}
+    </div>
+    <label>备注（Phase 1 可绑到带参脚本）</label>
+    <input type="text" name="note" placeholder="可选…" disabled />
+  </section>
+
+  <section id="dashboard-panel"
+    hx-get="/profiles/{{ profile.id }}/dashboard"
+    hx-trigger="load, every {{ profile.dashboard.refresh_interval_seconds }}s"
+    hx-swap="innerHTML">
+    <p class="meta">定时展示区加载中…</p>
+  </section>
+</div>
+
+<section style="margin-top: 1rem">
+  <h2>执行结果</h2>
+  <div id="run-result">
+    {% include "partials/run_result.html" %}
+  </div>
+</section>
+{% endblock %}
