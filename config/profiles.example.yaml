@@ -1,5 +1,5 @@
 defaults:
-  script_remote_dir: /opt/jop/scripts
+  script_remote_dir: /home/ops/jop/scripts
   protocol: ssh
   connect_method: web_cli
 

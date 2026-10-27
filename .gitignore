@@ -6,3 +6,4 @@ dist/
 data/
 config/profiles.yaml
 .env
+deploy/.last-image

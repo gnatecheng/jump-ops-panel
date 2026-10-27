@@ -1,0 +1,138 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jump-ops-panel-config
+  namespace: chengyt
+data:
+  profiles.yaml: |
+    defaults:
+      script_remote_dir: /home/ops/jop/scripts
+      protocol: ssh
+      connect_method: web_cli
+    profiles:
+      - id: ai-speaker-jms
+        label: "365 AI Speaker 跳板"
+        jumpserver:
+          base_url: http://jump-ai.365selection.com:33031/
+          username: hick
+          password_env: JOP_PASSWORD_HICK
+        target:
+          asset_ref: t3-365_ai-speaker_jumpserver_1
+          account_ref: ops
+          run_as:
+            method: sudo
+            user: root
+        init:
+          scripts:
+            - local: assets/scripts/k-get-nodes.sh
+              remote_name: k-get-nodes.sh
+            - local: assets/scripts/df-h.sh
+              remote_name: df-h.sh
+        operations:
+          - id: id
+            label: "当前用户 id"
+            command: id
+            timeout_seconds: 30
+          - id: k-get-nodes
+            label: "K8s 节点 (k get nodes)"
+            script: k-get-nodes.sh
+            timeout_seconds: 90
+        dashboard:
+          refresh_interval_seconds: 60
+          panels:
+            - id: nodes
+              label: "Nodes"
+              script: k-get-nodes.sh
+            - id: disk
+              label: "磁盘 df -h"
+              script: df-h.sh
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jump-ops-panel-secrets
+  namespace: chengyt
+type: Opaque
+stringData:
+  # 部署前请改为真实密码，或: kubectl create secret generic jump-ops-panel-secrets ...
+  JOP_PASSWORD_HICK: "REPLACE_ME"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jump-ops-panel
+  namespace: chengyt
+  labels:
+    app: jump-ops-panel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jump-ops-panel
+  template:
+    metadata:
+      labels:
+        app: jump-ops-panel
+    spec:
+      containers:
+        - name: panel
+          image: PLACEHOLDER_IMAGE
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8765
+          env:
+            - name: JOP_PASSWORD_HICK
+              valueFrom:
+                secretKeyRef:
+                  name: jump-ops-panel-secrets
+                  key: JOP_PASSWORD_HICK
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: jump-ops-panel-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jump-ops-panel
+  namespace: chengyt
+  labels:
+    app: jump-ops-panel
+spec:
+  type: NodePort
+  selector:
+    app: jump-ops-panel
+  ports:
+    - name: http
+      port: 8765
+      targetPort: http
+      nodePort: 30765
