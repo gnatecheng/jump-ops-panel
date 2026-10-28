@@ -2,9 +2,10 @@
 <p class="err">{{ job_lost_message }}</p>
 {% elif last_result %}
 {% set _dur = ((last_result.finished_at - last_result.started_at).total_seconds() if last_result.finished_at and last_result.started_at else none) %}
-{% with label=last_result.label, output_at=last_result.finished_at.isoformat() if last_result.finished_at else none, duration_seconds=_dur, exit_status=last_result.exit_status, error=last_result.error, stdout=last_result.stdout %}
+{% with label=last_result.label, output_id='exec', output_at=last_result.finished_at.isoformat() if last_result.finished_at else none, duration_seconds=_dur, exit_status=last_result.exit_status, error=last_result.error, stdout=last_result.stdout, omit_textarea=true %}
 {% include "partials/output_panel.html" %}
 {% endwith %}
+<span class="jop-exec-stdout-payload" hidden data-jop-exec-stdout>{{ last_result.stdout or '(无输出)' }}</span>
 {% else %}
 <p class="meta">尚未执行。选择脚本或 bash 命令后点 Exec。</p>
 {% endif %}

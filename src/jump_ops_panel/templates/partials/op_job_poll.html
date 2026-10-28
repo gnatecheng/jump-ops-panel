@@ -4,16 +4,16 @@
   hx-get="/profiles/{{ profile_id }}/ops/jobs/{{ job.id }}?result_element_id={{ result_element_id|default('run-result') }}"
   hx-trigger="every 2s"
   hx-swap="outerHTML">
-  {% with label=job.label, running=true, run_started_at=job.created_at.isoformat() %}
+  {% with label=job.label, running=true, run_started_at=job.created_at.isoformat(), omit_textarea=true %}
   {% include "partials/output_panel.html" %}
   {% endwith %}
   <p class="meta exec-job-hint">
     {% if job.status == "pending" %}排队中…{% else %}JumpServer 执行中{% endif %}
     · 已等待 <span class="jop-job-elapsed">0</span>s
     {% if job.kind == "exec" and job.target == "bash" %}
-    （bash：首次约 15–30s 建连，再次约数秒）
+    （共用终端：首次约 15–30s 建连，再次约数秒）
     {% elif job.kind == "exec" and job.target.endswith('.sh') %}
-    （脚本 {{ job.target }}：实测约 <strong>5 分钟</strong> 才有完整输出，300s 内未完成属正常）
+    （.sh 经 sudo→root · <code>bash -lc</code> 加载环境；kubectl 脚本参数可加 <code>-c context</code>）
     {% endif %}
   </p>
 </div>

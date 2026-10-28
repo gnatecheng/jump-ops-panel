@@ -1,5 +1,5 @@
 <h2>脚本与执行</h2>
-<p class="meta">上传 .sh 到跳板 {{ profile.jumpserver.base_url }} · 手动/定时各用独立终端。</p>
+<p class="meta">上传 .sh 到跳板 {{ profile.jumpserver.base_url }} · 手动 Exec 共用一条终端；每条定时仍独立终端。</p>
 
 <div class="upload-row">
   <form id="upload-form" enctype="multipart/form-data"
@@ -18,11 +18,11 @@
 
 <form id="exec-form" class="exec-row"
   hx-post="/profiles/{{ profile.id }}/exec"
-  hx-target="#exec-result"
+  hx-target="#exec-result-upper"
   hx-swap="outerHTML">
   {% include "partials/script_target_select.html" %}
   <input type="text" name="args_line" placeholder="脚本参数，或 bash 命令" style="flex:1;min-width:12rem" />
-  <button type="submit" class="primary">Exec</button>
+  <button type="submit" class="primary" id="exec-submit-btn">Exec</button>
   <input type="number" name="interval_seconds" min="5" value="30" style="width:5rem" title="定时间隔秒" />
   <button type="button" class="btn"
     hx-post="/profiles/{{ profile.id }}/schedules"
@@ -31,6 +31,4 @@
     hx-swap="innerHTML">添加定时</button>
 </form>
 
-<div id="exec-result" style="margin-top:0.75rem">
-  <p class="meta">（Exec 结果将显示在下方）</p>
-</div>
+{% include "partials/exec_result_shell.html" %}

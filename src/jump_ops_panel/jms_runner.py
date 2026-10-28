@@ -131,6 +131,7 @@ async def run_manual_remote(
     target: str,
     cache,
 ) -> RunResult:
+    """All UI Exec (bash and .sh) share one reused terminal per profile (serial use)."""
     started = datetime.now(tz=UTC)
     kind = command_kind_for_target(target)
 
@@ -223,27 +224,6 @@ async def run_ephemeral_remote(
         started_at=started,
         finished_at=finished,
         error=error,
-    )
-
-
-async def run_script_remote(
-    profile: ProfileConfig,
-    defaults: AppConfig,
-    remote_command: str,
-    *,
-    data_dir,
-    timeout_seconds: float,
-    label: str,
-) -> RunResult:
-    """Long .sh scripts use a dedicated terminal so manual bash cache stays free."""
-    return await run_ephemeral_remote(
-        profile,
-        defaults,
-        remote_command,
-        data_dir=data_dir,
-        timeout_seconds=timeout_seconds,
-        label=label,
-        command_kind="script",
     )
 
 

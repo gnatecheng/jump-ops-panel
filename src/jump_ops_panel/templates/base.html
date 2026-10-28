@@ -59,6 +59,7 @@
     .jop-age { font-variant-numeric: tabular-nums; color: #2563eb; font-weight: 500; }
     .jop-duration { font-variant-numeric: tabular-nums; color: #059669; font-weight: 500; }
     #schedule-panels .output-panel textarea.output-area { font-size: 0.8rem; min-height: 5rem; }
+    .exec-result-root #exec-output-area { margin-top: 0.35rem; }
     .upload-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; }
     .upload-status { flex: 1; min-width: 10rem; }
     .upload-msg { margin: 0; font-size: 0.9rem; }
@@ -67,6 +68,8 @@
     .htmx-indicator { opacity: 0; transition: opacity 200ms ease-in; }
     .htmx-request .htmx-indicator,
     .htmx-request.htmx-indicator { opacity: 1; }
+    #exec-form.jop-exec-busy { opacity: 0.72; cursor: wait; }
+    #exec-form.jop-exec-busy button.primary::after { content: '…'; }
   </style>
   <script>
     var jopClockLastSec = -1;
@@ -121,10 +124,202 @@
         ageEl.textContent = '-' + Math.max(0, Math.floor(delta)) + 's';
       });
     }
+    function jopExecOutputArea() {
+      return document.getElementById('exec-output-area');
+    }
+    function jopApplyExecStdoutFromRoot(root) {
+      var ta = jopExecOutputArea();
+      if (!ta || !root) return false;
+      var payload = root.querySelector('.jop-exec-stdout-payload, [data-jop-exec-stdout]');
+      if (!payload) return false;
+      var text = (payload.textContent || '').trim();
+      if (!text) {
+        var attr = payload.getAttribute('data-jop-exec-stdout');
+        if (attr) text = attr;
+      }
+      if (!text) text = '(无输出)';
+      if (ta.value !== text) ta.value = text;
+      return true;
+    }
+    function jopApplyExecStdoutFromResponseHtml(html) {
+      if (!html || (html.indexOf('jop-exec-stdout-payload') < 0 && html.indexOf('data-jop-exec-stdout') < 0)) {
+        return false;
+      }
+      var body = jopParseResponseHtml(html);
+      var root = body.querySelector('#exec-result-upper');
+      if (!root) return false;
+      return jopApplyExecStdoutFromRoot(root);
+    }
+    function jopApplyExecStdoutFromDocument() {
+      var upper = document.getElementById('exec-result-upper');
+      if (!upper) return false;
+      return jopApplyExecStdoutFromRoot(upper);
+    }
+    function jopSetExecOutputWaiting() {
+      var ta = jopExecOutputArea();
+      if (ta) ta.value = '执行中…（完成后显示输出）';
+    }
+    function jopIsExecPolling() {
+      var el = document.getElementById('exec-result-upper');
+      if (!el) return false;
+      var trig = el.getAttribute('hx-trigger') || '';
+      return trig.indexOf('every') >= 0;
+    }
+    function jopSetExecFormLocked(locked) {
+      var form = document.getElementById('exec-form');
+      if (!form) return;
+      form.classList.toggle('jop-exec-busy', locked);
+      form.setAttribute('aria-busy', locked ? 'true' : 'false');
+      form.querySelectorAll('button, select, input').forEach(function(el) {
+        el.disabled = locked;
+      });
+    }
+    function jopSyncExecFormLock() {
+      jopSetExecFormLocked(jopIsExecPolling());
+    }
+    function jopParseResponseHtml(html) {
+      return new DOMParser().parseFromString(html, 'text/html').body;
+    }
+    function jopMergeOutputPanel(oldPanel, newPanel) {
+      var at = newPanel.getAttribute('data-jop-at');
+      if (at) oldPanel.setAttribute('data-jop-at', at);
+      else oldPanel.removeAttribute('data-jop-at');
+      var rs = newPanel.getAttribute('data-jop-run-started');
+      if (rs) oldPanel.setAttribute('data-jop-run-started', rs);
+      else oldPanel.removeAttribute('data-jop-run-started');
+      var oldHead = oldPanel.querySelector('.output-head');
+      var newHead = newPanel.querySelector('.output-head');
+      if (oldHead && newHead) oldHead.innerHTML = newHead.innerHTML;
+      var oldErr = oldPanel.querySelector('.err');
+      var newErr = newPanel.querySelector('.err');
+      if (newErr) {
+        if (oldErr) oldErr.outerHTML = newErr.outerHTML;
+        else {
+          var ta = oldPanel.querySelector('textarea.output-area');
+          oldPanel.insertBefore(newErr.cloneNode(true), ta || null);
+        }
+      } else if (oldErr) oldErr.remove();
+      var oldTa = oldPanel.querySelector('textarea.output-area');
+      var newTa = newPanel.querySelector('textarea.output-area');
+      if (oldTa && newTa) {
+        var next = newTa.value || newTa.textContent || '';
+        if (oldTa.value !== next) oldTa.value = next;
+      } else if (!oldTa && newTa) {
+        oldPanel.appendChild(newTa.cloneNode(true));
+      } else if (oldTa && !newTa) {
+        oldTa.remove();
+      }
+    }
+    function jopMergeScheduleCard(oldCard, newCard) {
+      var oldTop = oldCard.querySelector('.schedule-card-title');
+      var newTop = newCard.querySelector('.schedule-card-title');
+      if (oldTop && newTop) oldTop.innerHTML = newTop.innerHTML;
+      var oldPanel = oldCard.querySelector('.output-panel');
+      var newPanel = newCard.querySelector('.output-panel');
+      var oldWait = oldCard.querySelector(':scope > p.meta');
+      var newWait = newCard.querySelector(':scope > p.meta');
+      if (newPanel) {
+        if (oldWait) oldWait.remove();
+        if (oldPanel) jopMergeOutputPanel(oldPanel, newPanel);
+        else oldCard.appendChild(newPanel.cloneNode(true));
+      } else if (newWait) {
+        if (oldPanel) oldPanel.remove();
+        if (oldWait) oldWait.textContent = newWait.textContent;
+        else oldCard.appendChild(newWait.cloneNode(true));
+      }
+    }
+    function jopTryMergeSchedulePanels(container, html) {
+      if (!html) return false;
+      var body = jopParseResponseHtml(html);
+      var newCards = body.querySelectorAll('.schedule-card');
+      var oldCards = container.querySelectorAll('.schedule-card');
+      if (newCards.length !== oldCards.length) return false;
+      var i, id, newCard;
+      for (i = 0; i < oldCards.length; i++) {
+        id = oldCards[i].id;
+        if (!id) return false;
+        newCard = body.querySelector('#' + CSS.escape(id));
+        if (!newCard) return false;
+      }
+      for (i = 0; i < oldCards.length; i++) {
+        id = oldCards[i].id;
+        newCard = body.querySelector('#' + CSS.escape(id));
+        jopMergeScheduleCard(oldCards[i], newCard);
+      }
+      return true;
+    }
+    function jopIsSchedulePoll(evt) {
+      var elt = evt.detail.requestConfig.elt || evt.detail.elt;
+      return elt && elt.id === 'schedule-panels';
+    }
+    function jopIsExecJobPollResponse(html) {
+      return html && html.indexOf('exec-job-poll') >= 0 && html.indexOf('every') >= 0;
+    }
+    function jopTryMergeExecPoll(target, html) {
+      if (!html || target.id !== 'exec-result-upper') return false;
+      var body = jopParseResponseHtml(html);
+      var newRoot = body.querySelector('#exec-result-upper');
+      if (!newRoot || !newRoot.classList.contains('exec-job-poll')) return false;
+      ['class', 'data-jop-job-started', 'hx-get', 'hx-trigger', 'hx-swap'].forEach(function(a) {
+        var v = newRoot.getAttribute(a);
+        if (v != null && v !== '') target.setAttribute(a, v);
+        else target.removeAttribute(a);
+      });
+      var oldPanel = target.querySelector('.output-panel');
+      var newPanel = newRoot.querySelector('.output-panel');
+      if (oldPanel && newPanel) jopMergeOutputPanel(oldPanel, newPanel);
+      var oldHint = target.querySelector('.exec-job-hint');
+      var newHint = newRoot.querySelector('.exec-job-hint');
+      if (oldHint && newHint) oldHint.innerHTML = newHint.innerHTML;
+      else if (!oldHint && newHint) target.appendChild(newHint.cloneNode(true));
+      else if (oldHint && !newHint) oldHint.remove();
+      return true;
+    }
+    function jopAfterContentMerge() {
+      jopUpdateAges();
+      jopUpdateJobElapsed();
+      jopSyncExecFormLock();
+    }
     function jopInitUi() {
       document.body.addEventListener('jop-upload-reset', function() {
         var form = document.getElementById('upload-form');
         if (form) form.reset();
+      });
+      document.body.addEventListener('htmx:beforeRequest', function(evt) {
+        var elt = evt.detail.elt;
+        if (elt && elt.id === 'exec-form') {
+          jopSetExecFormLocked(true);
+          jopSetExecOutputWaiting();
+        }
+      });
+      document.body.addEventListener('htmx:beforeSwap', function(evt) {
+        var target = evt.detail.target;
+        if (!target) return;
+        var html = evt.detail.serverResponse;
+        if (target.id === 'exec-result-upper') {
+          jopApplyExecStdoutFromDocument();
+          if (jopApplyExecStdoutFromResponseHtml(html)) {
+            jopSyncExecFormLock();
+          }
+        }
+        if (target.id === 'schedule-panels' && jopIsSchedulePoll(evt)) {
+          if (jopTryMergeSchedulePanels(target, html)) {
+            evt.detail.shouldSwap = false;
+            jopAfterContentMerge();
+            return;
+          }
+        }
+        if (
+          target.id === 'exec-result-upper'
+          && target.classList.contains('exec-job-poll')
+          && jopIsExecJobPollResponse(html)
+        ) {
+          if (jopTryMergeExecPoll(target, html)) {
+            evt.detail.shouldSwap = false;
+            jopAfterContentMerge();
+            return;
+          }
+        }
       });
       jopUpdateClock();
       jopUpdateAges();
@@ -134,21 +329,32 @@
         jopUpdateJobElapsed();
       }, 1000);
       setInterval(jopUpdateAges, 1000);
-      document.body.addEventListener('htmx:afterSwap', function() {
+      document.body.addEventListener('htmx:afterSwap', function(evt) {
         jopUpdateAges();
         jopUpdateJobElapsed();
+        var t = evt.detail.target;
+        if (evt.detail.target && evt.detail.target.id === 'exec-result-upper') {
+          jopApplyExecStdoutFromDocument();
+          jopSyncExecFormLock();
+        }
       });
-      document.body.addEventListener('htmx:afterSettle', function() {
+      document.body.addEventListener('htmx:afterSettle', function(evt) {
         jopUpdateAges();
         jopUpdateJobElapsed();
+        if (evt.detail.target && evt.detail.target.id === 'exec-result-upper') {
+          jopApplyExecStdoutFromDocument();
+          jopSyncExecFormLock();
+        }
       });
       document.body.addEventListener('htmx:oobAfterSwap', jopUpdateAges);
       document.body.addEventListener('htmx:responseError', function(evt) {
         var target = evt.detail.target;
-        if (!target || target.id !== 'exec-result') return;
-        target.outerHTML =
-          '<div id="exec-result"><p class="err">任务已失效（可能服务重启过）。请重新 Exec。</p></div>';
+        if (!target || target.id !== 'exec-result-upper') return;
+        target.innerHTML =
+          '<p class="err">任务已失效（可能服务重启过）。请重新 Exec。</p>';
+        jopSetExecFormLocked(false);
       });
+      jopSyncExecFormLock();
     }
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', jopInitUi);

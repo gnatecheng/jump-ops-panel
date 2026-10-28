@@ -125,15 +125,18 @@ class ScheduleStore:
         try:
             profile = config.get_profile(entry.profile_id)
             await self._ensure_session(entry)
+            tick_timeout = exec_timeout_for_target(config, entry.target)
             remote_command = build_remote_command(
                 config,
+                profile,
                 target=entry.target,
                 args_line=entry.args_line,
+                timeout_seconds=tick_timeout,
             )
             exit_status, stdout, hint = await run_on_handle(
                 entry.session_handle,
                 remote_command,
-                timeout_seconds=exec_timeout_for_target(config, entry.target),
+                timeout_seconds=tick_timeout,
                 command_kind=command_kind_for_target(entry.target),
             )
             entry.last_run_at = datetime.now(tz=UTC).isoformat()
@@ -182,7 +185,13 @@ class ScheduleStore:
         existing = self.list_for_profile(profile.id)
         if len(existing) >= MAX_SCHEDULES_PER_PROFILE:
             raise ValueError(f"每个环境最多 {MAX_SCHEDULES_PER_PROFILE} 个定时 Panel。")
-        build_remote_command(config, target=target, args_line=args_line)
+        build_remote_command(
+            config,
+            profile,
+            target=target,
+            args_line=args_line,
+            timeout_seconds=exec_timeout_for_target(config, target),
+        )
         interval_seconds = max(int(interval_seconds), 5)
         entry = ScheduleEntry(
             id=uuid.uuid4().hex[:10],

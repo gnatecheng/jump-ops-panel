@@ -21,7 +21,11 @@
     </span>
   </div>
   {% if error %}<p class="err">{{ error }}</p>{% endif %}
+  {% if not omit_textarea|default(false) %}
   {% if stdout is defined and not running %}
-  <textarea class="output-area" readonly rows="10" aria-label="命令输出">{{ stdout or '(无输出)' }}</textarea>
+  <textarea class="output-area" readonly rows="10" aria-label="命令输出"{% if output_id %} data-jop-output-id="{{ output_id }}"{% endif %}>{{ stdout or '(无输出)' }}</textarea>
+  {% elif always_textarea|default(false) %}
+  <textarea class="output-area" readonly rows="10" aria-label="命令输出"{% if output_id %} data-jop-output-id="{{ output_id }}"{% endif %}>{{ stdout|default('') }}</textarea>
+  {% endif %}
   {% endif %}
 </div>

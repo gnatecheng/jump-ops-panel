@@ -30,11 +30,11 @@
   </div>
   {% if entry.last_run_at %}
   {% if entry.last_error %}
-  {% with label='最近输出', output_at=entry.last_run_at, duration_seconds=entry.last_duration_seconds, exit_status=entry.last_exit_status, error=entry.last_error, stdout='' %}
+  {% with label='最近输出', output_id='schedule-' ~ entry.id, output_at=entry.last_run_at, duration_seconds=entry.last_duration_seconds, exit_status=entry.last_exit_status, error=entry.last_error, stdout='' %}
   {% include "partials/output_panel.html" %}
   {% endwith %}
   {% else %}
-  {% with label='最近输出', output_at=entry.last_run_at, duration_seconds=entry.last_duration_seconds, exit_status=entry.last_exit_status, error='', stdout=entry.last_stdout %}
+  {% with label='最近输出', output_id='schedule-' ~ entry.id, output_at=entry.last_run_at, duration_seconds=entry.last_duration_seconds, exit_status=entry.last_exit_status, error='', stdout=entry.last_stdout %}
   {% include "partials/output_panel.html" %}
   {% endwith %}
   {% endif %}

@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from .exec_command import build_remote_command, exec_timeout_for_target, format_exec_label
-from .jms_runner import RunResult, run_manual_remote, run_operation, run_script_remote
+from .jms_runner import RunResult, run_manual_remote, run_operation
 from .models import AppConfig, OperationConfig, ProfileConfig
 
 JobKind = Literal["operation", "exec"]
@@ -127,32 +127,24 @@ class OpJobStore:
     ) -> None:
         job.status = "running"
         try:
+            timeout_seconds = exec_timeout_for_target(config, target)
             remote_command = build_remote_command(
                 config,
+                profile,
                 target=target,
                 args_line=args_line,
+                timeout_seconds=timeout_seconds,
             )
-            timeout_seconds = exec_timeout_for_target(config, target)
-            if target.strip() == "bash":
-                job.result = await run_manual_remote(
-                    profile,
-                    config,
-                    remote_command,
-                    data_dir=data_dir,
-                    timeout_seconds=timeout_seconds,
-                    label=job.label,
-                    target=target,
-                    cache=manual_exec_cache,
-                )
-            else:
-                job.result = await run_script_remote(
-                    profile,
-                    config,
-                    remote_command,
-                    data_dir=data_dir,
-                    timeout_seconds=timeout_seconds,
-                    label=job.label,
-                )
+            job.result = await run_manual_remote(
+                profile,
+                config,
+                remote_command,
+                data_dir=data_dir,
+                timeout_seconds=timeout_seconds,
+                label=job.label,
+                target=target,
+                cache=manual_exec_cache,
+            )
             job.status = "done"
         except Exception as exc:
             job.status = "failed"

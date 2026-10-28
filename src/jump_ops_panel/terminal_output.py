@@ -10,7 +10,8 @@ def settle_timeout_for(
     if command_kind == "bash":
         # Short commands (id, kubectl get …) should not wait 30–60s of silence.
         return min(5.0, max(2.0, total_timeout_seconds * 0.05))
-    return max(30.0, min(total_timeout_seconds * 0.5, 120.0))
+    # Scripts (kubectl+json): output is bursty then quiet; avoid 30–120s idle waits.
+    return min(20.0, max(5.0, total_timeout_seconds * 0.02))
 
 
 def command_kind_for_target(target: str) -> str:

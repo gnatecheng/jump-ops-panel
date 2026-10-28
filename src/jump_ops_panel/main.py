@@ -209,7 +209,7 @@ async def exec_command(
     return TEMPLATES.TemplateResponse(
         request,
         "partials/op_job_poll.html",
-        {"job": job, "profile_id": profile_id, "result_element_id": "exec-result"},
+        {"job": job, "profile_id": profile_id, "result_element_id": "exec-result-upper"},
     )
 
 
