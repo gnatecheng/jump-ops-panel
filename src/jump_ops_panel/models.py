@@ -69,6 +69,10 @@ class ProfileConfig(BaseModel):
 
 class DefaultsConfig(BaseModel):
     script_remote_dir: str = "/opt/jop/scripts"
+    # KoKo web SFTP mirrors absolute paths under this prefix on some assets (/path -> /tmp/path).
+    script_sftp_mirror_prefix: str = "/tmp"
+    exec_script_timeout_seconds: float = 360.0
+    exec_bash_timeout_seconds: float = 120.0
     protocol: str = "ssh"
     connect_method: str = "web_cli"
 

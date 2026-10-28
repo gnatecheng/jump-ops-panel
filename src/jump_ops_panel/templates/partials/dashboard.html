@@ -14,7 +14,7 @@
   {% endif %}
   {% if snap.result %}
   <div class="meta">exit={{ snap.result.exit_status if snap.result.exit_status is not none else '?' }}</div>
-  <pre class="output">{{ snap.result.stdout or '(无输出)' }}</pre>
+  <textarea class="output-area" readonly rows="10" aria-label="命令输出">{{ snap.result.stdout or '(无输出)' }}</textarea>
   {% else %}
   <p class="meta">等待首次刷新…</p>
   {% endif %}

@@ -1,11 +1,10 @@
-{% if last_result %}
-<div class="meta">
-  {{ last_result.label }} ·
-  exit={{ last_result.exit_status if last_result.exit_status is not none else '?' }} ·
-  {{ last_result.finished_at.strftime('%H:%M:%S') }} UTC
-</div>
-{% if last_result.error %}<p class="err">{{ last_result.error }}</p>{% endif %}
-<pre class="output">{{ last_result.stdout or '(无输出)' }}</pre>
+{% if job_lost_message %}
+<p class="err">{{ job_lost_message }}</p>
+{% elif last_result %}
+{% set _dur = ((last_result.finished_at - last_result.started_at).total_seconds() if last_result.finished_at and last_result.started_at else none) %}
+{% with label=last_result.label, output_at=last_result.finished_at.isoformat() if last_result.finished_at else none, duration_seconds=_dur, exit_status=last_result.exit_status, error=last_result.error, stdout=last_result.stdout %}
+{% include "partials/output_panel.html" %}
+{% endwith %}
 {% else %}
-<p class="meta">尚未执行操作。点击上方按钮运行脚本。</p>
+<p class="meta">尚未执行。选择脚本或 bash 命令后点 Exec。</p>
 {% endif %}

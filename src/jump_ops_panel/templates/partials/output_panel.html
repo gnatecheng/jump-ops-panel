@@ -1,0 +1,27 @@
+{# label, output_at, duration_seconds, run_started_at (ISO, running), exit_status, error, stdout, running #}
+<div class="output-panel"{% if output_at %} data-jop-at="{{ output_at }}"{% endif %}{% if run_started_at %} data-jop-run-started="{{ run_started_at }}"{% endif %}>
+  <div class="output-head">
+    <span class="output-label">{{ label }}</span>
+    <span class="output-head-meta">
+      {% if duration_seconds is defined and duration_seconds is not none %}
+      <span class="jop-duration" title="本次执行耗时">耗时 {{ duration_seconds|round(0)|int }}s</span>
+      {% elif running and run_started_at %}
+      <span class="jop-duration jop-duration-live" title="执行中耗时">耗时 <span class="jop-duration-val">0</span>s</span>
+      {% elif running %}
+      <span class="meta">执行中…</span>
+      {% endif %}
+      {% if output_at %}
+      <span class="jop-age" title="相对页面「当前」时间">-0s</span>
+      {% endif %}
+      {% if exit_status is defined and exit_status is not none %}
+      <span class="meta">exit={{ exit_status }}</span>
+      {% elif exit_status is defined %}
+      <span class="meta">exit=?</span>
+      {% endif %}
+    </span>
+  </div>
+  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+  {% if stdout is defined and not running %}
+  <textarea class="output-area" readonly rows="10" aria-label="命令输出">{{ stdout or '(无输出)' }}</textarea>
+  {% endif %}
+</div>

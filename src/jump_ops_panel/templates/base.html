@@ -8,14 +8,28 @@
   <style>
     :root { font-family: system-ui, sans-serif; color: #1a1a1a; background: #f4f5f7; }
     body { margin: 0; padding: 1rem 1.25rem 2rem; }
-    header { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    header.app-header { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
     h1 { font-size: 1.25rem; margin: 0; }
+    .header-target { flex: 1 1 auto; min-width: 8rem; }
+    .jop-clock-wrap {
+      position: fixed; top: 0.65rem; right: 1rem; z-index: 200;
+      display: flex; align-items: baseline; gap: 0.35rem;
+      background: rgba(244, 245, 247, 0.92); padding: 0.35rem 0.65rem;
+      border-radius: 8px; border: 1px solid #ddd; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    .jop-clock-label { font-size: 0.8rem; color: #666; }
+    .jop-clock { font-variant-numeric: tabular-nums; font-size: 0.95rem; color: #111; font-weight: 500; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
     @media (max-width: 960px) { .grid { grid-template-columns: 1fr; } }
     section { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 1rem; }
     section h2 { margin: 0 0 0.75rem; font-size: 1rem; }
-    pre.output { background: #111; color: #e6e6e6; padding: 0.75rem; border-radius: 6px;
-      overflow: auto; max-height: 28rem; white-space: pre-wrap; font-size: 0.85rem; margin: 0; }
+    textarea.output-area {
+      display: block; width: 100%; box-sizing: border-box; margin: 0;
+      background: #111; color: #e6e6e6; padding: 0.75rem; border-radius: 6px;
+      border: 1px solid #333; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.85rem; line-height: 1.4; white-space: pre; overflow: auto;
+      resize: vertical; min-height: 6rem; max-height: 80vh;
+    }
     .meta { color: #666; font-size: 0.85rem; margin-bottom: 0.5rem; }
     button, .btn { cursor: pointer; padding: 0.4rem 0.75rem; border-radius: 6px;
       border: 1px solid #888; background: #fafafa; font-size: 0.9rem; }
@@ -27,9 +41,127 @@
     select { padding: 0.35rem 0.5rem; }
     label { display: block; margin: 0.5rem 0 0.25rem; font-size: 0.9rem; }
     input[type=text] { width: 100%; max-width: 24rem; padding: 0.35rem 0.5rem; }
+    .exec-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.75rem; }
+    .exec-row select, .exec-row input[type=text] { max-width: none; }
+    .schedule-card { border: 1px solid #ddd; border-radius: 6px; padding: 0.6rem; margin-bottom: 0.75rem; }
+    .schedule-card-top { display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .schedule-card-title { flex: 1; min-width: 0; }
+    .schedule-card-title strong { display: block; font-size: 0.95rem; }
+    .schedule-icon-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
+    .icon-btn { display: inline-flex; align-items: center; justify-content: center;
+      width: 2rem; height: 2rem; padding: 0; border-radius: 6px; border: 1px solid #ccc;
+      background: #fff; color: #333; }
+    .icon-btn:hover { background: #f0f0f0; }
+    .icon-btn-danger { color: #b91c1c; border-color: #fca5a5; }
+    .output-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
+      gap: 0.35rem 0.75rem; margin-bottom: 0.35rem; }
+    .output-head-meta { display: inline-flex; align-items: baseline; gap: 0.5rem; }
+    .jop-age { font-variant-numeric: tabular-nums; color: #2563eb; font-weight: 500; }
+    .jop-duration { font-variant-numeric: tabular-nums; color: #059669; font-weight: 500; }
+    #schedule-panels .output-panel textarea.output-area { font-size: 0.8rem; min-height: 5rem; }
+    .upload-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; }
+    .upload-status { flex: 1; min-width: 10rem; }
+    .upload-msg { margin: 0; font-size: 0.9rem; }
+    .upload-msg.ok { color: #15803d; }
+    .upload-msg.err { color: #b91c1c; }
+    .htmx-indicator { opacity: 0; transition: opacity 200ms ease-in; }
+    .htmx-request .htmx-indicator,
+    .htmx-request.htmx-indicator { opacity: 1; }
   </style>
+  <script>
+    var jopClockLastSec = -1;
+    function jopPad2(n) {
+      return (n < 10 ? '0' : '') + n;
+    }
+    function jopFormatLocalTime(d) {
+      return d.getFullYear() + '-' + jopPad2(d.getMonth() + 1) + '-' + jopPad2(d.getDate()) +
+        ' ' + jopPad2(d.getHours()) + ':' + jopPad2(d.getMinutes()) + ':' + jopPad2(d.getSeconds());
+    }
+    function jopUpdateClock() {
+      var now = new Date();
+      var sec = Math.floor(now.getTime() / 1000);
+      if (sec === jopClockLastSec) return;
+      jopClockLastSec = sec;
+      var el = document.getElementById('jop-clock');
+      if (!el) return;
+      el.textContent = jopFormatLocalTime(now);
+      el.setAttribute('datetime', now.toISOString());
+    }
+    function jopUpdateJobElapsed() {
+      var now = Date.now();
+      document.querySelectorAll('[data-jop-job-started]').forEach(function(node) {
+        var raw = node.getAttribute('data-jop-job-started');
+        if (!raw) return;
+        var at = Date.parse(raw);
+        if (isNaN(at)) return;
+        var el = node.querySelector('.jop-job-elapsed');
+        if (!el) return;
+        el.textContent = String(Math.max(0, Math.floor((now - at) / 1000)));
+      });
+      document.querySelectorAll('[data-jop-run-started]').forEach(function(node) {
+        var raw = node.getAttribute('data-jop-run-started');
+        if (!raw) return;
+        var at = Date.parse(raw);
+        if (isNaN(at)) return;
+        var el = node.querySelector('.jop-duration-val');
+        if (!el) return;
+        el.textContent = String(Math.max(0, Math.floor((now - at) / 1000)));
+      });
+    }
+    function jopUpdateAges() {
+      var now = Date.now();
+      document.querySelectorAll('[data-jop-at]').forEach(function(node) {
+        var raw = node.getAttribute('data-jop-at');
+        if (!raw) return;
+        var at = Date.parse(raw);
+        if (isNaN(at)) return;
+        var ageEl = node.querySelector('.jop-age');
+        if (!ageEl) return;
+        var delta = (now - at) / 1000;
+        ageEl.textContent = '-' + Math.max(0, Math.floor(delta)) + 's';
+      });
+    }
+    function jopInitUi() {
+      document.body.addEventListener('jop-upload-reset', function() {
+        var form = document.getElementById('upload-form');
+        if (form) form.reset();
+      });
+      jopUpdateClock();
+      jopUpdateAges();
+      jopUpdateJobElapsed();
+      setInterval(function() {
+        jopUpdateClock();
+        jopUpdateJobElapsed();
+      }, 1000);
+      setInterval(jopUpdateAges, 1000);
+      document.body.addEventListener('htmx:afterSwap', function() {
+        jopUpdateAges();
+        jopUpdateJobElapsed();
+      });
+      document.body.addEventListener('htmx:afterSettle', function() {
+        jopUpdateAges();
+        jopUpdateJobElapsed();
+      });
+      document.body.addEventListener('htmx:oobAfterSwap', jopUpdateAges);
+      document.body.addEventListener('htmx:responseError', function(evt) {
+        var target = evt.detail.target;
+        if (!target || target.id !== 'exec-result') return;
+        target.outerHTML =
+          '<div id="exec-result"><p class="err">任务已失效（可能服务重启过）。请重新 Exec。</p></div>';
+      });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', jopInitUi);
+    } else {
+      jopInitUi();
+    }
+  </script>
 </head>
 <body>
+  <div class="jop-clock-wrap" aria-live="polite">
+    <span class="jop-clock-label">当前</span>
+    <time id="jop-clock" class="jop-clock" datetime="" aria-label="当前时间">{{ jop_clock_seed() }}</time>
+  </div>
   {% block body %}{% endblock %}
 </body>
 </html>

@@ -1,0 +1,4 @@
+<option value="bash">bash（任意命令）</option>
+{% for script in scripts %}
+<option value="{{ script.name }}">{{ script.name }}</option>
+{% endfor %}

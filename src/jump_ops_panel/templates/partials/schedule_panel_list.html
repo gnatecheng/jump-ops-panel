@@ -1,0 +1,8 @@
+<h2>定时 Panel</h2>
+<p class="meta">最多 4 个 · 关浏览器仍会继续 · Pause / 删除在卡片右上角</p>
+{% if not entries %}
+<p class="meta">暂无。左侧 Exec 行设置间隔后点「添加定时」。</p>
+{% endif %}
+{% for entry in entries %}
+{% include "partials/schedule_card.html" %}
+{% endfor %}

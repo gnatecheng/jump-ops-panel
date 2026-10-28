@@ -1,0 +1,36 @@
+<h2>脚本与执行</h2>
+<p class="meta">上传 .sh 到跳板 {{ profile.jumpserver.base_url }} · 手动/定时各用独立终端。</p>
+
+<div class="upload-row">
+  <form id="upload-form" enctype="multipart/form-data"
+    hx-post="/profiles/{{ profile.id }}/scripts/upload"
+    hx-encoding="multipart/form-data"
+    hx-trigger="change from:input[type=file]"
+    hx-target="#upload-status"
+    hx-swap="innerHTML"
+    hx-indicator="#upload-indicator">
+    <input type="file" name="file" accept=".sh,.SH" title="选择 .sh 脚本上传" />
+  </form>
+  <span id="upload-indicator" class="htmx-indicator meta">上传中…</span>
+  <div id="upload-status" class="upload-status" aria-live="polite"></div>
+</div>
+<p class="meta">选文件即上传（仅 .sh，最大 256KB）；成功后会出现在下方下拉列表。</p>
+
+<form id="exec-form" class="exec-row"
+  hx-post="/profiles/{{ profile.id }}/exec"
+  hx-target="#exec-result"
+  hx-swap="outerHTML">
+  {% include "partials/script_target_select.html" %}
+  <input type="text" name="args_line" placeholder="脚本参数，或 bash 命令" style="flex:1;min-width:12rem" />
+  <button type="submit" class="primary">Exec</button>
+  <input type="number" name="interval_seconds" min="5" value="30" style="width:5rem" title="定时间隔秒" />
+  <button type="button" class="btn"
+    hx-post="/profiles/{{ profile.id }}/schedules"
+    hx-include="#exec-form"
+    hx-target="#schedule-panels"
+    hx-swap="innerHTML">添加定时</button>
+</form>
+
+<div id="exec-result" style="margin-top:0.75rem">
+  <p class="meta">（Exec 结果将显示在下方）</p>
+</div>

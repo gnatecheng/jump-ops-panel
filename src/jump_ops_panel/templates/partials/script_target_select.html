@@ -1,0 +1,6 @@
+<select name="target" id="script-target" required{% if oob|default(false) %} hx-swap-oob="outerHTML"{% endif %}>
+  <option value="bash"{% if selected == 'bash' %} selected{% endif %}>bash（任意命令）</option>
+  {% for script in scripts %}
+  <option value="{{ script.name }}"{% if script.name == selected %} selected{% endif %}>{{ script.name }}</option>
+  {% endfor %}
+</select>

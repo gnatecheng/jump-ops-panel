@@ -8,6 +8,9 @@ data:
   profiles.yaml: |
     defaults:
       script_remote_dir: /home/ops/jop/scripts
+      script_sftp_mirror_prefix: /tmp
+      exec_script_timeout_seconds: 360
+      exec_bash_timeout_seconds: 120
       protocol: ssh
       connect_method: web_cli
     profiles:
@@ -96,6 +99,8 @@ spec:
           env:
             - name: JOP_PROJECT_ROOT
               value: /build/jump-ops-panel
+            - name: MCP_JUMPSERVER_GUI_SUCKS_MAX_TERMINAL_SESSIONS
+              value: "16"
             - name: JOP_ALLOW_PASSWORD_LOGIN
               value: "false"
             - name: JOP_PASSWORD_HICK

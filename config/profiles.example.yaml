@@ -1,5 +1,6 @@
 defaults:
   script_remote_dir: /home/ops/jop/scripts
+  script_sftp_mirror_prefix: /tmp
   protocol: ssh
   connect_method: web_cli
 

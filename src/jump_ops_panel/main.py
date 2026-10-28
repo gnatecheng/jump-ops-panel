@@ -6,7 +6,8 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -15,10 +16,22 @@ from .dashboard_store import DashboardStore
 from .jms_runner import RunResult
 from .models import AppConfig
 from .op_jobs import OpJobStore
-from .scheduler import start_dashboard_scheduler
+from .manual_exec_cache import ManualExecCache
+from .schedule_store import ScheduleStore
+from .script_catalog import ScriptCatalog
+from .script_upload import upload_script_file
 
 LOGGER = logging.getLogger(__name__)
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+
+def _jop_clock_seed() -> str:
+    from datetime import datetime
+
+    return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
+TEMPLATES.env.globals["jop_clock_seed"] = _jop_clock_seed
 
 
 @dataclass
@@ -29,6 +42,9 @@ class AppState:
     config: AppConfig
     dashboard: DashboardStore = field(default_factory=DashboardStore)
     op_jobs: OpJobStore = field(default_factory=OpJobStore)
+    script_catalog: ScriptCatalog | None = None
+    schedule_store: ScheduleStore | None = None
+    manual_exec_cache: ManualExecCache = field(default_factory=ManualExecCache)
     last_results: dict[str, RunResult] = field(default_factory=dict)
 
 
@@ -60,25 +76,39 @@ def _active_profile(state: AppState, profile_id: str | None):
     return state.config.profiles[0]
 
 
+def _scripts_context(state: AppState, profile_id: str) -> dict:
+    assert state.script_catalog is not None
+    return {"scripts": state.script_catalog.list_scripts(profile_id)}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     config_path = _config_path()
     data_dir = _data_dir()
     config = load_config(config_path)
-    app.state.jop = AppState(
+    scheduler = AsyncIOScheduler()
+    jop = AppState(
         config_path=config_path,
         data_dir=data_dir,
         root=project_root(),
         config=config,
+        script_catalog=ScriptCatalog(data_dir),
     )
-    scheduler = start_dashboard_scheduler(
-        config_path=config_path,
+    app.state.jop = jop
+    jop.schedule_store = ScheduleStore(
+        scheduler,
         data_dir=data_dir,
-        store=app.state.jop.dashboard,
+        state_getter=lambda: app.state.jop,
     )
+    jop.schedule_store.load_from_disk()
+    await jop.schedule_store.bootstrap_jobs()
+    scheduler.start()
     LOGGER.info("Jump Ops Panel started; config=%s", config_path)
     yield
     scheduler.shutdown(wait=False)
+    if jop.schedule_store:
+        await jop.schedule_store.close_all_sessions()
+    await jop.manual_exec_cache.close_all()
 
 
 app = FastAPI(title="Jump Ops Panel", lifespan=lifespan)
@@ -97,48 +127,89 @@ async def index(request: Request, profile: str | None = None) -> HTMLResponse:
             "active_id": active.id,
             "profile": active,
             "last_result": state.last_results.get(active.id),
+            **_scripts_context(state, active.id),
         },
     )
 
 
-@app.post("/profiles/{profile_id}/init", response_class=HTMLResponse)
-async def init_scripts(request: Request, profile_id: str) -> HTMLResponse:
+@app.post("/profiles/{profile_id}/scripts/upload", response_class=HTMLResponse)
+async def upload_script(
+    request: Request,
+    profile_id: str,
+    file: UploadFile = File(...),
+) -> HTMLResponse:
     state: AppState = request.app.state.jop
     state.config = load_config(state.config_path)
     profile = _active_profile(state, profile_id)
-    state.dashboard.cancel_for_user(profile_id)
-    job = state.op_jobs.start_init(
+    assert state.script_catalog is not None
+    body = await file.read()
+    filename = file.filename or "script.sh"
+    try:
+        entry = await upload_script_file(
+            profile,
+            state.config,
+            data_dir=state.data_dir,
+            filename=filename,
+            body=body,
+            catalog=state.script_catalog,
+        )
+    except ValueError as exc:
+        return TEMPLATES.TemplateResponse(
+            request,
+            "partials/upload_feedback.html",
+            {
+                "ok": False,
+                "message": str(exc),
+            },
+        )
+    except Exception as exc:
+        LOGGER.exception("Upload failed")
+        return TEMPLATES.TemplateResponse(
+            request,
+            "partials/upload_feedback.html",
+            {
+                "ok": False,
+                "message": f"上传失败：{exc}",
+            },
+        )
+    response = TEMPLATES.TemplateResponse(
+        request,
+        "partials/upload_feedback.html",
+        {
+            "ok": True,
+            "message": f"上传成功：{entry.name}",
+            "oob": True,
+            **_scripts_context(state, profile_id),
+            "selected": entry.name,
+        },
+    )
+    if request.headers.get("HX-Request"):
+        response.headers["HX-Trigger"] = "jop-upload-reset"
+    return response
+
+
+@app.post("/profiles/{profile_id}/exec", response_class=HTMLResponse)
+async def exec_command(
+    request: Request,
+    profile_id: str,
+    target: str = Form(...),
+    args_line: str = Form(""),
+) -> HTMLResponse:
+    state: AppState = request.app.state.jop
+    state.config = load_config(state.config_path)
+    profile = _active_profile(state, profile_id)
+    job = state.op_jobs.start_exec(
         profile,
         state.config,
+        target=target,
+        args_line=args_line,
         data_dir=state.data_dir,
-        project_root=state.root,
+        manual_exec_cache=state.manual_exec_cache,
     )
     return TEMPLATES.TemplateResponse(
         request,
         "partials/op_job_poll.html",
-        {"job": job, "profile_id": profile_id},
-    )
-
-
-@app.post("/profiles/{profile_id}/ops/{op_id}", response_class=HTMLResponse)
-async def run_op(request: Request, profile_id: str, op_id: str) -> HTMLResponse:
-    state: AppState = request.app.state.jop
-    state.config = load_config(state.config_path)
-    profile = _active_profile(state, profile_id)
-    operation = next((op for op in profile.operations if op.id == op_id), None)
-    if operation is None:
-        raise HTTPException(status_code=404, detail="Operation not found.")
-    state.dashboard.cancel_for_user(profile_id)
-    job = state.op_jobs.start_operation(
-        profile,
-        state.config,
-        operation,
-        data_dir=state.data_dir,
-    )
-    return TEMPLATES.TemplateResponse(
-        request,
-        "partials/op_job_poll.html",
-        {"job": job, "profile_id": profile_id},
+        {"job": job, "profile_id": profile_id, "result_element_id": "exec-result"},
     )
 
 
@@ -147,16 +218,27 @@ async def op_job_status(
     request: Request,
     profile_id: str,
     job_id: str,
+    result_element_id: str = "run-result",
 ) -> HTMLResponse:
     state: AppState = request.app.state.jop
     job = state.op_jobs.get(job_id)
     if job is None or job.profile_id != profile_id:
-        raise HTTPException(status_code=404, detail="Job not found.")
+        element_id = request.query_params.get("result_element_id", result_element_id)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "partials/exec_result.html",
+            {
+                "last_result": None,
+                "result_element_id": element_id,
+                "job_lost_message": "任务不存在或 Pod 已重启，请重新 Exec。",
+            },
+        )
+    element_id = request.query_params.get("result_element_id", result_element_id)
     if job.status in ("pending", "running"):
         return TEMPLATES.TemplateResponse(
             request,
             "partials/op_job_poll.html",
-            {"job": job, "profile_id": profile_id},
+            {"job": job, "profile_id": profile_id, "result_element_id": element_id},
         )
     if job.status == "failed" and job.result is None:
         finished = job.finished_at or job.created_at
@@ -177,8 +259,91 @@ async def op_job_status(
     state.last_results[profile_id] = result
     return TEMPLATES.TemplateResponse(
         request,
-        "partials/run_result_wrap.html",
-        {"last_result": result},
+        "partials/exec_result.html",
+        {
+            "last_result": result,
+            "result_element_id": element_id,
+            "job_lost_message": None,
+        },
+    )
+
+
+@app.get("/profiles/{profile_id}/schedules", response_class=HTMLResponse)
+async def list_schedules(request: Request, profile_id: str) -> HTMLResponse:
+    state: AppState = request.app.state.jop
+    assert state.schedule_store is not None
+    entries = state.schedule_store.list_for_profile(profile_id)
+    return TEMPLATES.TemplateResponse(
+        request,
+        "partials/schedule_panel_list.html",
+        {"entries": entries, "profile_id": profile_id},
+    )
+
+
+@app.post("/profiles/{profile_id}/schedules", response_class=HTMLResponse)
+async def add_schedule(
+    request: Request,
+    profile_id: str,
+    target: str = Form(...),
+    args_line: str = Form(""),
+    interval_seconds: int = Form(...),
+) -> HTMLResponse:
+    state: AppState = request.app.state.jop
+    state.config = load_config(state.config_path)
+    profile = _active_profile(state, profile_id)
+    assert state.schedule_store is not None
+    try:
+        await state.schedule_store.add(
+            profile,
+            state.config,
+            target=target,
+            args_line=args_line,
+            interval_seconds=interval_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    entries = state.schedule_store.list_for_profile(profile_id)
+    return TEMPLATES.TemplateResponse(
+        request,
+        "partials/schedule_panel_list.html",
+        {"entries": entries, "profile_id": profile_id},
+    )
+
+
+@app.post("/profiles/{profile_id}/schedules/{schedule_id}/toggle", response_class=HTMLResponse)
+async def toggle_schedule(
+    request: Request,
+    profile_id: str,
+    schedule_id: str,
+) -> HTMLResponse:
+    state: AppState = request.app.state.jop
+    assert state.schedule_store is not None
+    try:
+        await state.schedule_store.toggle_pause(schedule_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Schedule not found.") from exc
+    entries = state.schedule_store.list_for_profile(profile_id)
+    return TEMPLATES.TemplateResponse(
+        request,
+        "partials/schedule_panel_list.html",
+        {"entries": entries, "profile_id": profile_id},
+    )
+
+
+@app.delete("/profiles/{profile_id}/schedules/{schedule_id}", response_class=HTMLResponse)
+async def delete_schedule(
+    request: Request,
+    profile_id: str,
+    schedule_id: str,
+) -> HTMLResponse:
+    state: AppState = request.app.state.jop
+    assert state.schedule_store is not None
+    await state.schedule_store.delete(schedule_id)
+    entries = state.schedule_store.list_for_profile(profile_id)
+    return TEMPLATES.TemplateResponse(
+        request,
+        "partials/schedule_panel_list.html",
+        {"entries": entries, "profile_id": profile_id},
     )
 
 

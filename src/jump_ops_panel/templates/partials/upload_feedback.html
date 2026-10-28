@@ -1,0 +1,8 @@
+{% if ok %}
+<p class="upload-msg ok">{{ message }}</p>
+{% else %}
+<p class="upload-msg err">{{ message }}</p>
+{% endif %}
+{% if ok %}
+{% include "partials/script_target_select.html" %}
+{% endif %}

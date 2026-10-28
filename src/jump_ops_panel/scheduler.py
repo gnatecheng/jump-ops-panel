@@ -12,14 +12,13 @@ from .models import AppConfig
 LOGGER = logging.getLogger(__name__)
 
 
-def start_dashboard_scheduler(
+def register_dashboard_jobs(
+    scheduler: AsyncIOScheduler,
     *,
     config_path: Path,
     data_dir: Path,
     store: DashboardStore,
-) -> AsyncIOScheduler:
-    scheduler = AsyncIOScheduler()
-
+) -> None:
     def reload_config() -> AppConfig:
         return load_config(config_path)
 
@@ -46,6 +45,3 @@ def start_dashboard_scheduler(
             max_instances=1,
             coalesce=True,
         )
-
-    scheduler.start()
-    return scheduler

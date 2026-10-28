@@ -5,9 +5,8 @@ import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from .jms_runner import RunResult, profile_terminal_lock, run_operation, run_script_name
+from .jms_runner import RunResult, run_operation, run_script_name
 from .models import AppConfig, OperationConfig, ProfileConfig
-from .terminal_coord import should_yield_terminal, signal_user_terminal
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,12 +43,6 @@ class DashboardStore:
         self._states[profile_id] = state
         return state
 
-    def cancel_for_user(self, profile_id: str) -> None:
-        signal_user_terminal(profile_id)
-        task = self._refresh_tasks.get(profile_id)
-        if task is not None and not task.done():
-            task.cancel()
-
     def schedule_refresh(
         self,
         profile: ProfileConfig,
@@ -78,66 +71,51 @@ class DashboardStore:
         *,
         data_dir,
     ) -> DashboardState:
-        try:
-            async with profile_terminal_lock(profile.id):
-                prior = self._states.get(profile.id)
-                state = DashboardState(
-                    profile_id=profile.id,
-                    panels=dict(prior.panels) if prior else {},
-                    refresh_in_progress=True,
-                )
-                self._states[profile.id] = state
-                for panel in profile.dashboard.panels:
-                    if should_yield_terminal(profile.id):
-                        LOGGER.info(
-                            "Dashboard refresh yielding terminal to user op (%s)",
-                            profile.id,
-                        )
-                        break
-                    snapshot = PanelSnapshot(panel_id=panel.id, label=panel.label)
-                    try:
-                        if panel.command:
-                            op = OperationConfig(
-                                id=panel.id,
-                                label=panel.label,
-                                command=panel.command,
-                                timeout_seconds=30.0,
-                            )
-                            coro = run_operation(
-                                profile,
-                                config,
-                                op,
-                                data_dir=data_dir,
-                                terminal_lock_held=True,
-                            )
-                        elif panel.script:
-                            coro = run_script_name(
-                                profile,
-                                config,
-                                panel.script,
-                                label=panel.label,
-                                data_dir=data_dir,
-                                timeout_seconds=90.0,
-                                terminal_lock_held=True,
-                            )
-                        else:
-                            snapshot.last_error = "panel 需配置 script 或 command"
-                            state.panels[panel.id] = snapshot
-                            continue
-                        snapshot.result = await asyncio.wait_for(coro, timeout=95.0)
-                        if snapshot.result.error:
-                            snapshot.last_error = snapshot.result.error
-                    except TimeoutError:
-                        snapshot.last_error = "看板脚本超时（95s）"
-                    except Exception as exc:
-                        snapshot.last_error = str(exc)
+        prior = self._states.get(profile.id)
+        state = DashboardState(
+            profile_id=profile.id,
+            panels=dict(prior.panels) if prior else {},
+            refresh_in_progress=True,
+        )
+        self._states[profile.id] = state
+        for panel in profile.dashboard.panels:
+            snapshot = PanelSnapshot(panel_id=panel.id, label=panel.label)
+            try:
+                if panel.command:
+                    op = OperationConfig(
+                        id=panel.id,
+                        label=panel.label,
+                        command=panel.command,
+                        timeout_seconds=30.0,
+                    )
+                    coro = run_operation(
+                        profile,
+                        config,
+                        op,
+                        data_dir=data_dir,
+                    )
+                elif panel.script:
+                    coro = run_script_name(
+                        profile,
+                        config,
+                        panel.script,
+                        label=panel.label,
+                        data_dir=data_dir,
+                        timeout_seconds=90.0,
+                    )
+                else:
+                    snapshot.last_error = "panel 需配置 script 或 command"
                     state.panels[panel.id] = snapshot
-                state.updated_at = datetime.now(tz=UTC)
-                state.refresh_in_progress = False
-                self._states[profile.id] = state
-                return state
-        except asyncio.CancelledError:
-            state = self._states.get(profile.id)
-            if state is not None:
-                state.refresh_in_progress = False
-            raise
+                    continue
+                snapshot.result = await asyncio.wait_for(coro, timeout=95.0)
+                if snapshot.result.error:
+                    snapshot.last_error = snapshot.result.error
+            except TimeoutError:
+                snapshot.last_error = "看板脚本超时（95s）"
+            except Exception as exc:
+                snapshot.last_error = str(exc)
+            state.panels[panel.id] = snapshot
+        state.updated_at = datetime.now(tz=UTC)
+        state.refresh_in_progress = False
+        self._states[profile.id] = state
+        return state

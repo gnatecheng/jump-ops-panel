@@ -6,10 +6,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
 
-from .jms_runner import RunResult, deploy_init_scripts, run_operation
+from .exec_command import build_remote_command, exec_timeout_for_target, format_exec_label
+from .jms_runner import RunResult, run_manual_remote, run_operation, run_script_remote
 from .models import AppConfig, OperationConfig, ProfileConfig
 
-JobKind = Literal["operation", "init"]
+JobKind = Literal["operation", "exec"]
 JobStatus = Literal["pending", "running", "done", "failed"]
 
 
@@ -20,6 +21,7 @@ class OpJob:
     kind: JobKind
     status: JobStatus = "pending"
     label: str = ""
+    target: str = ""
     created_at: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
     finished_at: datetime | None = None
     result: RunResult | None = None
@@ -55,29 +57,35 @@ class OpJobStore:
         )
         return job
 
-    def start_init(
+    def start_exec(
         self,
         profile: ProfileConfig,
         config: AppConfig,
         *,
+        target: str,
+        args_line: str,
         data_dir,
-        project_root,
+        manual_exec_cache,
     ) -> OpJob:
         job_id = uuid.uuid4().hex[:12]
+        label = format_exec_label(target=target, args_line=args_line)
         job = OpJob(
             id=job_id,
             profile_id=profile.id,
-            kind="init",
-            label="初始化脚本",
+            kind="exec",
+            label=label,
+            target=target.strip(),
         )
         self._jobs[job_id] = job
         self._tasks[job_id] = asyncio.create_task(
-            self._run_init(
+            self._run_exec(
                 job,
                 profile,
                 config,
+                target=target,
+                args_line=args_line,
                 data_dir=data_dir,
-                project_root=project_root,
+                manual_exec_cache=manual_exec_cache,
             )
         )
         return job
@@ -98,7 +106,6 @@ class OpJobStore:
                 config,
                 operation,
                 data_dir=data_dir,
-                user_priority=True,
             )
             job.status = "done"
         except Exception as exc:
@@ -107,24 +114,45 @@ class OpJobStore:
         finally:
             job.finished_at = datetime.now(tz=UTC)
 
-    async def _run_init(
+    async def _run_exec(
         self,
         job: OpJob,
         profile: ProfileConfig,
         config: AppConfig,
         *,
+        target: str,
+        args_line: str,
         data_dir,
-        project_root,
+        manual_exec_cache,
     ) -> None:
         job.status = "running"
         try:
-            job.result = await deploy_init_scripts(
-                profile,
+            remote_command = build_remote_command(
                 config,
-                data_dir=data_dir,
-                project_root=project_root,
-                user_priority=True,
+                target=target,
+                args_line=args_line,
             )
+            timeout_seconds = exec_timeout_for_target(config, target)
+            if target.strip() == "bash":
+                job.result = await run_manual_remote(
+                    profile,
+                    config,
+                    remote_command,
+                    data_dir=data_dir,
+                    timeout_seconds=timeout_seconds,
+                    label=job.label,
+                    target=target,
+                    cache=manual_exec_cache,
+                )
+            else:
+                job.result = await run_script_remote(
+                    profile,
+                    config,
+                    remote_command,
+                    data_dir=data_dir,
+                    timeout_seconds=timeout_seconds,
+                    label=job.label,
+                )
             job.status = "done"
         except Exception as exc:
             job.status = "failed"

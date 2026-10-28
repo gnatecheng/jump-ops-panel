@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import shlex
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -16,39 +15,7 @@ from mcp_jumpserver_gui_sucks.service import (
 from .jms_auth import ensure_authenticated
 from .jms_env import profile_jms_env
 from .models import AppConfig, OperationConfig, ProfileConfig
-from .terminal_coord import clear_user_terminal, signal_user_terminal
-
-_profile_terminal_locks: dict[str, asyncio.Lock] = {}
-
-
-def profile_terminal_lock(profile_id: str) -> asyncio.Lock:
-    if profile_id not in _profile_terminal_locks:
-        _profile_terminal_locks[profile_id] = asyncio.Lock()
-    return _profile_terminal_locks[profile_id]
-
-
-class ProfileTerminalBusyError(RuntimeError):
-    """Raised when the profile terminal lock is held (e.g. dashboard refresh)."""
-
-
-async def acquire_profile_terminal(
-    profile_id: str,
-    *,
-    wait_seconds: float,
-    user_priority: bool = False,
-) -> None:
-    if user_priority:
-        signal_user_terminal(profile_id)
-    lock = profile_terminal_lock(profile_id)
-    try:
-        await asyncio.wait_for(lock.acquire(), timeout=wait_seconds)
-    except TimeoutError as exc:
-        if user_priority:
-            clear_user_terminal(profile_id)
-        raise ProfileTerminalBusyError(
-            "JumpServer 终端仍被占用（看板刷新或其它任务）。请等 1–2 分钟再试；"
-            "也可点看板「立即刷新」完成后再操作。"
-        ) from exc
+from .terminal_output import clean_command_stdout, command_kind_for_target, settle_timeout_for
 
 
 @dataclass
@@ -83,67 +50,217 @@ def _build_command(
     raise ValueError("Either script_name or command is required.")
 
 
-async def _run_on_session(
+async def _apply_run_as(
+    profile: ProfileConfig,
+    handle: str,
+    *,
+    timeout_seconds: float,
+) -> None:
+    run_as = profile.target.run_as
+    if run_as.method.lower() == "sudo" and run_as.user:
+        await switch_terminal_user_payload(
+            session_handle=handle,
+            target_user=run_as.user,
+            method="sudo",
+            total_timeout_seconds=min(timeout_seconds, 30.0),
+        )
+
+
+async def open_dedicated_terminal(
     profile: ProfileConfig,
     defaults: AppConfig,
+    *,
+    data_dir,
+    reuse_existing: bool = False,
+) -> str:
+    set_package_log_level("WARNING")
+    with profile_jms_env(profile, data_dir=data_dir):
+        await ensure_authenticated(profile, data_dir=data_dir)
+        opened = await acquire_terminal_session_payload(
+            asset_ref=profile.target.asset_ref,
+            account_ref=profile.target.account_ref,
+            protocol=defaults.defaults.protocol,
+            connect_method=defaults.defaults.connect_method,
+            reuse_existing=reuse_existing,
+        )
+        return str(opened["session_handle"])
+
+
+async def close_terminal(handle: str) -> None:
+    try:
+        await close_terminal_session_payload(session_handle=handle)
+    except Exception:
+        pass
+
+
+async def run_on_handle(
+    handle: str,
     remote_command: str,
     *,
     timeout_seconds: float,
-) -> tuple[int | None, str]:
-    set_package_log_level("WARNING")
-    opened = await acquire_terminal_session_payload(
-        asset_ref=profile.target.asset_ref,
-        account_ref=profile.target.account_ref,
-        protocol=defaults.defaults.protocol,
-        connect_method=defaults.defaults.connect_method,
+    command_kind: str = "script",
+) -> tuple[int | None, str, str]:
+    payload = await run_terminal_command_payload(
+        session_handle=handle,
+        command=remote_command,
+        settle_timeout_seconds=settle_timeout_for(
+            timeout_seconds,
+            command_kind=command_kind,
+        ),
+        total_timeout_seconds=timeout_seconds,
     )
-    handle = str(opened["session_handle"])
-    try:
-        run_as = profile.target.run_as
-        if run_as.method.lower() == "sudo" and run_as.user:
-            await switch_terminal_user_payload(
-                session_handle=handle,
-                target_user=run_as.user,
-                method="sudo",
-                total_timeout_seconds=min(timeout_seconds, 30.0),
-            )
-        payload = await run_terminal_command_payload(
-            session_handle=handle,
-            command=remote_command,
-            settle_timeout_seconds=2.0,
-            total_timeout_seconds=timeout_seconds,
-        )
-        exit_status = payload.get("exit_status")
-        stdout = str(payload.get("command_stdout_text") or "").strip()
-        return (
-            int(exit_status) if exit_status is not None else None,
-            stdout,
-        )
-    finally:
-        await close_terminal_session_payload(session_handle=handle)
+    exit_status = payload.get("exit_status")
+    stdout, hint = clean_command_stdout(payload)
+    if hint and stdout:
+        hint = ""
+    return (
+        int(exit_status) if exit_status is not None else None,
+        stdout,
+        hint,
+    )
 
 
-async def _run_operation_locked(
+async def run_manual_remote(
     profile: ProfileConfig,
     defaults: AppConfig,
-    operation: OperationConfig,
+    remote_command: str,
     *,
     data_dir,
-    started: datetime,
-    remote_command: str,
-) -> tuple[int | None, str, str]:
-    with profile_jms_env(profile, data_dir=data_dir):
-        await ensure_authenticated(profile, data_dir=data_dir)
-        try:
-            exit_status, stdout = await _run_on_session(
+    timeout_seconds: float,
+    label: str,
+    target: str,
+    cache,
+) -> RunResult:
+    started = datetime.now(tz=UTC)
+    kind = command_kind_for_target(target)
+
+    async def opener() -> str:
+        return await open_dedicated_terminal(
+            profile,
+            defaults,
+            data_dir=data_dir,
+            reuse_existing=True,
+        )
+
+    async def runner(entry) -> RunResult:
+        if not entry.run_as_done:
+            await _apply_run_as(
                 profile,
-                defaults,
-                remote_command,
-                timeout_seconds=operation.timeout_seconds,
+                entry.handle,
+                timeout_seconds=timeout_seconds,
             )
-            return exit_status, stdout, ""
-        except Exception as exc:
-            return None, "", str(exc)
+            entry.run_as_done = True
+        exit_status, stdout, hint = await run_on_handle(
+            entry.handle,
+            remote_command,
+            timeout_seconds=timeout_seconds,
+            command_kind=kind,
+        )
+        finished = datetime.now(tz=UTC)
+        return RunResult(
+            profile_id=profile.id,
+            label=label,
+            command=remote_command,
+            exit_status=exit_status,
+            stdout=stdout,
+            started_at=started,
+            finished_at=finished,
+            error=hint,
+        )
+
+    try:
+        return await cache.with_session(profile.id, opener, runner)
+    except Exception as exc:
+        finished = datetime.now(tz=UTC)
+        return RunResult(
+            profile_id=profile.id,
+            label=label,
+            command=remote_command,
+            exit_status=None,
+            stdout="",
+            started_at=started,
+            finished_at=finished,
+            error=str(exc),
+        )
+
+
+async def run_ephemeral_remote(
+    profile: ProfileConfig,
+    defaults: AppConfig,
+    remote_command: str,
+    *,
+    data_dir,
+    timeout_seconds: float = 90.0,
+    label: str = "exec",
+    command_kind: str = "script",
+) -> RunResult:
+    started = datetime.now(tz=UTC)
+    handle: str | None = None
+    try:
+        handle = await open_dedicated_terminal(profile, defaults, data_dir=data_dir)
+        await _apply_run_as(profile, handle, timeout_seconds=timeout_seconds)
+        exit_status, stdout, hint = await run_on_handle(
+            handle,
+            remote_command,
+            timeout_seconds=timeout_seconds,
+            command_kind=command_kind,
+        )
+        error = hint
+    except Exception as exc:
+        exit_status = None
+        stdout = ""
+        error = str(exc)
+    finally:
+        if handle:
+            await close_terminal(handle)
+    finished = datetime.now(tz=UTC)
+    return RunResult(
+        profile_id=profile.id,
+        label=label,
+        command=remote_command,
+        exit_status=exit_status,
+        stdout=stdout,
+        started_at=started,
+        finished_at=finished,
+        error=error,
+    )
+
+
+async def run_script_remote(
+    profile: ProfileConfig,
+    defaults: AppConfig,
+    remote_command: str,
+    *,
+    data_dir,
+    timeout_seconds: float,
+    label: str,
+) -> RunResult:
+    """Long .sh scripts use a dedicated terminal so manual bash cache stays free."""
+    return await run_ephemeral_remote(
+        profile,
+        defaults,
+        remote_command,
+        data_dir=data_dir,
+        timeout_seconds=timeout_seconds,
+        label=label,
+        command_kind="script",
+    )
+
+
+async def open_prepared_terminal(
+    profile: ProfileConfig,
+    defaults: AppConfig,
+    *,
+    data_dir,
+    timeout_seconds: float = 30.0,
+) -> str:
+    handle = await open_dedicated_terminal(profile, defaults, data_dir=data_dir)
+    try:
+        await _apply_run_as(profile, handle, timeout_seconds=timeout_seconds)
+        return handle
+    except Exception:
+        await close_terminal(handle)
+        raise
 
 
 async def run_operation(
@@ -155,68 +272,20 @@ async def run_operation(
     terminal_lock_held: bool = False,
     user_priority: bool = False,
 ) -> RunResult:
-    started = datetime.now(tz=UTC)
+    del terminal_lock_held, user_priority
     remote_command = _build_command(
         profile,
         defaults,
         script_name=operation.script,
         command=operation.command,
     )
-    exit_status: int | None
-    stdout: str
-    error: str
-    if terminal_lock_held:
-        exit_status, stdout, error = await _run_operation_locked(
-            profile,
-            defaults,
-            operation,
-            data_dir=data_dir,
-            started=started,
-            remote_command=remote_command,
-        )
-    else:
-        wait_seconds = 180.0 if user_priority else 15.0
-        try:
-            await acquire_profile_terminal(
-                profile.id,
-                wait_seconds=wait_seconds,
-                user_priority=user_priority,
-            )
-        except ProfileTerminalBusyError as exc:
-            finished = datetime.now(tz=UTC)
-            return RunResult(
-                profile_id=profile.id,
-                label=operation.label,
-                command=remote_command,
-                exit_status=None,
-                stdout="",
-                started_at=started,
-                finished_at=finished,
-                error=str(exc),
-            )
-        try:
-            exit_status, stdout, error = await _run_operation_locked(
-                profile,
-                defaults,
-                operation,
-                data_dir=data_dir,
-                started=started,
-                remote_command=remote_command,
-            )
-        finally:
-            profile_terminal_lock(profile.id).release()
-            if user_priority:
-                clear_user_terminal(profile.id)
-    finished = datetime.now(tz=UTC)
-    return RunResult(
-        profile_id=profile.id,
+    return await run_ephemeral_remote(
+        profile,
+        defaults,
+        remote_command,
+        data_dir=data_dir,
+        timeout_seconds=operation.timeout_seconds,
         label=operation.label,
-        command=remote_command,
-        exit_status=exit_status,
-        stdout=stdout,
-        started_at=started,
-        finished_at=finished,
-        error=error,
     )
 
 
@@ -230,104 +299,11 @@ async def run_script_name(
     timeout_seconds: float = 90.0,
     terminal_lock_held: bool = False,
 ) -> RunResult:
+    del terminal_lock_held
     op = OperationConfig(
         id=script_name,
         label=label,
         script=script_name,
         timeout_seconds=timeout_seconds,
     )
-    return await run_operation(
-        profile,
-        defaults,
-        op,
-        data_dir=data_dir,
-        terminal_lock_held=terminal_lock_held,
-    )
-
-
-async def deploy_init_scripts(
-    profile: ProfileConfig,
-    defaults: AppConfig,
-    *,
-    data_dir,
-    project_root,
-    user_priority: bool = False,
-) -> RunResult:
-    from .config_loader import resolve_local_script
-
-    started = datetime.now(tz=UTC)
-    remote_dir = defaults.defaults.script_remote_dir
-    chunks: list[str] = []
-    for item in profile.init.scripts:
-        try:
-            local_path = resolve_local_script(item.local, root=project_root)
-            body = local_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            finished = datetime.now(tz=UTC)
-            return RunResult(
-                profile_id=profile.id,
-                label="初始化脚本",
-                command=f"deploy -> {remote_dir}",
-                exit_status=None,
-                stdout="",
-                started_at=started,
-                finished_at=finished,
-                error=str(exc),
-            )
-        remote_path = f"{remote_dir.rstrip('/')}/{item.remote_name}"
-        quoted = shlex.quote(remote_path)
-        chunks.append(
-            f"mkdir -p {shlex.quote(remote_dir)} && "
-            f"cat > {quoted} <<'JOP_EOF'\n{body}\nJOP_EOF\n"
-            f"chmod 755 {quoted}"
-        )
-    remote_command = " && ".join(chunks) if chunks else "echo 'no init scripts'"
-    wait_seconds = 180.0 if user_priority else 15.0
-    try:
-        await acquire_profile_terminal(
-            profile.id,
-            wait_seconds=wait_seconds,
-            user_priority=user_priority,
-        )
-    except ProfileTerminalBusyError as exc:
-        finished = datetime.now(tz=UTC)
-        return RunResult(
-            profile_id=profile.id,
-            label="初始化脚本",
-            command=f"deploy {len(profile.init.scripts)} file(s) -> {remote_dir}",
-            exit_status=None,
-            stdout="",
-            started_at=started,
-            finished_at=finished,
-            error=str(exc),
-        )
-    try:
-        with profile_jms_env(profile, data_dir=data_dir):
-            await ensure_authenticated(profile, data_dir=data_dir)
-            try:
-                exit_status, stdout = await _run_on_session(
-                    profile,
-                    defaults,
-                    remote_command,
-                    timeout_seconds=120.0,
-                )
-                error = ""
-            except Exception as exc:
-                exit_status = None
-                stdout = ""
-                error = str(exc)
-    finally:
-        profile_terminal_lock(profile.id).release()
-        if user_priority:
-            clear_user_terminal(profile.id)
-    finished = datetime.now(tz=UTC)
-    return RunResult(
-        profile_id=profile.id,
-        label="初始化脚本",
-        command=f"deploy {len(profile.init.scripts)} file(s) -> {remote_dir}",
-        exit_status=exit_status,
-        stdout=stdout or ("OK" if not error else ""),
-        started_at=started,
-        finished_at=finished,
-        error=error,
-    )
+    return await run_operation(profile, defaults, op, data_dir=data_dir)
