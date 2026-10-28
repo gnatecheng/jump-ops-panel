@@ -17,11 +17,14 @@ if [[ -z "${IMAGE}" ]]; then
 fi
 
 if [[ -n "${JOP_PASSWORD_HICK:-}" ]]; then
-  kubectl --context "${CTX}" -n "${NS}" create secret generic jump-ops-panel-secrets \
-    --from-literal=JOP_PASSWORD_HICK="${JOP_PASSWORD_HICK}" \
-    --dry-run=client -o yaml | kubectl --context "${CTX}" apply -f -
+  "${DIR}/update-jms-password.sh"
 else
-  echo "Hint: export JOP_PASSWORD_HICK=... before deploy to set JumpServer password secret."
+  if ! kubectl --context "${CTX}" -n "${NS}" get secret jump-ops-panel-secrets &>/dev/null; then
+    echo "ERROR: Secret jump-ops-panel-secrets 不存在。请先运行:" >&2
+    echo "  JOP_PASSWORD_HICK='...' ${DIR}/update-jms-password.sh" >&2
+    exit 1
+  fi
+  echo "Secret 未改动（未设置 JOP_PASSWORD_HICK）。仅更新 Deployment/ConfigMap。"
 fi
 
 TMP="$(mktemp)"

@@ -31,14 +31,11 @@ def start_dashboard_scheduler(
             return
         if not profile.dashboard.panels:
             return
-        try:
-            await store.refresh_profile(profile, config, data_dir=data_dir)
-        except Exception:
-            LOGGER.exception("Dashboard refresh failed for profile %s", profile_id)
+        store.schedule_refresh(profile, config, data_dir=data_dir)
 
     config = load_config(config_path)
     for profile in config.profiles:
-        interval = max(profile.dashboard.refresh_interval_seconds, 15)
+        interval = max(profile.dashboard.refresh_interval_seconds, 5)
         scheduler.add_job(
             tick,
             "interval",

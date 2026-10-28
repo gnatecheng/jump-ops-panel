@@ -1,4 +1,6 @@
-<h2>定时展示 · {{ state.updated_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC</h2>
+<h2>定时展示 · {{ state.updated_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC
+  {% if state.refresh_in_progress %}<span class="meta">（刷新中…）</span>{% endif %}
+</h2>
 {% if not state.panels %}
 <p class="meta">未配置 dashboard.panels</p>
 {% endif %}

@@ -48,7 +48,8 @@ class OperationConfig(BaseModel):
 class DashboardPanel(BaseModel):
     id: str
     label: str
-    script: str
+    script: str | None = None
+    command: str | None = None
 
 
 class DashboardConfig(BaseModel):

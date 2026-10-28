@@ -1,0 +1,10 @@
+<div id="run-result"
+  hx-get="/profiles/{{ profile_id }}/ops/jobs/{{ job.id }}"
+  hx-trigger="every 2s"
+  hx-swap="outerHTML">
+  <p class="meta">
+    {{ job.label }} · 执行中…
+    {% if job.status == "pending" %}（排队）{% elif job.status == "running" %}（JumpServer，通常 15–30 秒）{% endif %}
+  </p>
+  <p class="meta">若 DevTools 里 POST 显示 502，多为本地代理约 10s 超时；结果区会每 2 秒自动刷新。</p>
+</div>

@@ -49,6 +49,7 @@ ENV JOP_HOST=0.0.0.0 \
     JOP_PORT=8765 \
     JOP_CONFIG=/config/profiles.yaml \
     JOP_DATA_DIR=/data \
+    JOP_PROJECT_ROOT=/build/jump-ops-panel \
     MCP_JUMPSERVER_GUI_SUCKS_LOG_LEVEL=WARNING
 
 LABEL org.opencontainers.image.title="jump-ops-panel" \

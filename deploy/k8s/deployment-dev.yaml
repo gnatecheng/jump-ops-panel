@@ -39,24 +39,14 @@ data:
             script: k-get-nodes.sh
             timeout_seconds: 90
         dashboard:
-          refresh_interval_seconds: 60
+          refresh_interval_seconds: 5
           panels:
+            - id: refresh-time
+              label: "刷新时间 (date)"
+              command: date
             - id: nodes
               label: "Nodes"
               script: k-get-nodes.sh
-            - id: disk
-              label: "磁盘 df -h"
-              script: df-h.sh
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: jump-ops-panel-secrets
-  namespace: chengyt
-type: Opaque
-stringData:
-  # 部署前请改为真实密码，或: kubectl create secret generic jump-ops-panel-secrets ...
-  JOP_PASSWORD_HICK: "REPLACE_ME"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -75,6 +65,27 @@ spec:
       labels:
         app: jump-ops-panel
     spec:
+      initContainers:
+        - name: seed-jms-auth-state
+          image: PLACEHOLDER_IMAGE
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              mkdir -p /data/state/ai-speaker-jms
+              if [ -f /seed/auth-state.json ]; then
+                cp -f /seed/auth-state.json /data/state/ai-speaker-jms/auth-state.json
+                chmod 600 /data/state/ai-speaker-jms/auth-state.json
+              fi
+          volumeMounts:
+            - name: jms-auth-state
+              mountPath: /seed/auth-state.json
+              subPath: auth-state.json
+              readOnly: true
+            - name: data
+              mountPath: /data
       containers:
         - name: panel
           image: PLACEHOLDER_IMAGE
@@ -83,6 +94,10 @@ spec:
             - name: http
               containerPort: 8765
           env:
+            - name: JOP_PROJECT_ROOT
+              value: /build/jump-ops-panel
+            - name: JOP_ALLOW_PASSWORD_LOGIN
+              value: "false"
             - name: JOP_PASSWORD_HICK
               valueFrom:
                 secretKeyRef:
@@ -119,6 +134,10 @@ spec:
             name: jump-ops-panel-config
         - name: data
           emptyDir: {}
+        - name: jms-auth-state
+          secret:
+            secretName: jump-ops-panel-auth-state
+            optional: true
 ---
 apiVersion: v1
 kind: Service

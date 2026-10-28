@@ -33,11 +33,11 @@ profiles:
         script: k-get-nodes.sh
         timeout_seconds: 90
     dashboard:
-      refresh_interval_seconds: 60
+      refresh_interval_seconds: 5
       panels:
+        - id: refresh-time
+          label: "刷新时间 (date)"
+          command: date
         - id: nodes
           label: "Nodes"
           script: k-get-nodes.sh
-        - id: disk
-          label: "磁盘 df -h"
-          script: df-h.sh

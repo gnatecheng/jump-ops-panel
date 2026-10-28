@@ -31,7 +31,19 @@ def list_profile_summaries(config: AppConfig) -> list[dict[str, str]]:
 
 
 def project_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    raw = os.getenv("JOP_PROJECT_ROOT", "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    here = Path(__file__).resolve().parent
+    # editable layout: jump-ops-panel/src/jump_ops_panel/...
+    repo_candidate = here.parent.parent
+    if (repo_candidate / "assets").is_dir():
+        return repo_candidate
+    # docker / pip: assets live beside WORKDIR in image
+    docker_candidate = Path("/build/jump-ops-panel")
+    if (docker_candidate / "assets").is_dir():
+        return docker_candidate
+    return repo_candidate
 
 
 def resolve_local_script(local_rel: str, root: Path | None = None) -> Path:

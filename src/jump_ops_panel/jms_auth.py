@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from mcp_jumpserver_gui_sucks.cli_login import JumpServerCLILogin, LoginFlowError
 from mcp_jumpserver_gui_sucks.config import Settings
 from mcp_jumpserver_gui_sucks.logging_utils import set_package_log_level
-from mcp_jumpserver_gui_sucks.service import build_status_payload
+from mcp_jumpserver_gui_sucks.service import build_status_payload, refresh_terminal_auth_payload
 from mcp_jumpserver_gui_sucks.session_store import SessionStore
 
 from .config_loader import resolve_password
@@ -61,11 +62,31 @@ def login_with_password(profile: ProfileConfig, password: str) -> None:
         flow.close()
 
 
+def _allow_password_login() -> bool:
+    return os.getenv("JOP_ALLOW_PASSWORD_LOGIN", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 async def ensure_authenticated(profile: ProfileConfig, *, data_dir) -> None:
     with profile_jms_env(profile, data_dir=data_dir):
         if await auth_status_ok():
             return
+        await refresh_terminal_auth_payload(force=False)
+        if await auth_status_ok():
+            return
+        if not _allow_password_login():
+            raise LoginFlowError(
+                "JumpServer 会话无效。Pod 内无法用密码登录（JumpServer 验证码需要人工输入）。"
+                "请在本机 mcp-jumpserver-gui-sucks login 后执行 deploy/k8s/upload-auth-state.sh 同步 auth-state。"
+            )
         password = resolve_password(profile.jumpserver)
         await asyncio.to_thread(login_with_password, profile, password)
         if not await auth_status_ok():
-            raise LoginFlowError("JumpServer login completed but session probe failed.")
+            raise LoginFlowError(
+                "JumpServer 密码登录后仍无法建立会话（常见原因：验证码）。"
+                "请改用 upload-auth-state.sh 上传本机 CLI 登录后的 auth-state。"
+            )
